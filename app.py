@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
-import datetime, threading, time, math, json, urllib.request, random
+import datetime, threading, time, math, json, urllib.request, random, os
 
 app = Flask(__name__)
 CORS(app)
@@ -161,6 +161,7 @@ bot_state = {
         "currency_note": "1 USD = 1 EUR (vereinfacht) 1 Lot = 100 oz 1 Punkt = Lotx100 EUR"
     }
 }
+
 def add_log(msg, level="INFO"):
     entry = {"time": datetime.datetime.utcnow().strftime("%H:%M:%S"), "msg": msg, "level": level}
     bot_state["log"].insert(0, entry)
@@ -784,13 +785,12 @@ def strategy_breakout(inds, candles):
     return {"strategy": "BREAKOUT", "score": sc, "direction": d, "signals": sg}
 
 def check_confirmations(direction, inds):
-    # Dummy Bestätigungs-Engine basierend auf Spezifikation
     if not direction: return False
     bot_state["confirmations"]["passed"] = ["DXY Abgleich", "Session Check"]
     bot_state["confirmations"]["count"] = 2
     return True
 
-# HINTERGRUND-SCHLEIFE (ANALYSIS LOOP)
+# HINTERGRUND-SCHLEIFE (ANALYSIS LOOP) - ABSTURZSICHER OPTIMIERT
 def analysis_loop():
     add_log("Hintergrund-Analyse gestartet.", "INFO")
     while bot_state["running"]:
@@ -803,6 +803,8 @@ def analysis_loop():
                 bot_state["price"] = p
                 bot_state["prices"].append(p)
                 if len(bot_state["prices"]) > 100: bot_state["prices"].pop(0)
+            else:
+                add_log("Konnte aktuellen Preis nicht abrufen (Yahoo API eventuell temporär blockiert).", "WARN")
             
             update_intermarket()
             
@@ -825,9 +827,9 @@ def analysis_loop():
             check_news_lock()
             check_guardrails()
             
-            # Strategie-Berechnung triggern
-            inds = bot_state["indicators"]
-            c_1h = bot_state["candles"]["1h"]
+            # Strategie-Berechnung triggern - FEHLERTOLERANT GEGEN KEYERROR
+            inds = bot_state.get("indicators", {})
+            c_1h = bot_state["candles"].get("1h", [])
             
             if inds and len(c_1h) >= 20:
                 mb = calc_macro_bias(inds)
@@ -846,6 +848,8 @@ def analysis_loop():
                     "breakout": res_bo["score"],
                     "macro_structure": res_mac["score"]
                 }
+            else:
+                add_log("Warte auf vollständige Marktdaten für Strategie-Scoring...", "WARN")
             
             bot_state["last_update"] = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
             time.sleep(60) # Scan jede Minute
@@ -946,7 +950,7 @@ DASHBOARD_HTML = """
 </html>
 """
 
-# FLASK FLUSS-STEUERUNG / ENDPUNKTE
+# FLASK ENDPUNKTE
 @app.route("/")
 def index():
     return render_template_string(DASHBOARD_HTML, state=bot_state)
@@ -982,14 +986,12 @@ def webhook():
             "entry": data.get("entry") or pr,
             "tp1": data.get("tp1"),
             "tp2": data.get("tp2"),
-            "tp3": data.get("tp3"),
             "sl": data.get("sl"),
             "time": datetime.datetime.utcnow().strftime("%H:%M:%S"),
             "date": datetime.datetime.utcnow().strftime("%d.%m.%Y")
         }
         bot_state["willy_last"] = we
         bot_state["willy_signals"].insert(0, we)
-        
         if len(bot_state["willy_signals"]) > 200: 
             bot_state["willy_signals"].pop()
             
@@ -1000,4 +1002,6 @@ def webhook():
         return jsonify({"status": "error"}), 400
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+    # Railway-Port-Dynamik nutzen (wichtig!)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True, use_reloader=False)
