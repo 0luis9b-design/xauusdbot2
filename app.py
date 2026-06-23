@@ -1,20 +1,14 @@
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
-import datetime
-import threading
-import time
-import math
-import json
-import urllib.request
-import random
+import datetime, threading, time, math, json, urllib.request, random
 
 app = Flask(__name__)
 CORS(app)
 
+# GLOBALER ZUSTAND v4.0
 def def_strat_stats():
     return {"trades": 0, "wins": 0, "losses": 0, "pnl": 0.0, "eur_pnl": 0.0, "best": 0.0, "worst": 0.0, "win_rate": 0.0}
 
-# GLOBALER ZUSTAND v4.0
 bot_state = {
     "price": None,
     "prices": [],
